@@ -1,0 +1,14 @@
+name: "readers"
+description: "A minimalistic library for incremental file reading and buffering."
+publish_to: none
+version: 0.0.1-alpha
+
+environment:
+  sdk: ">=3.5.0<4.0.0"
+
+dependencies:
+  meta:
+
+dev_dependencies:
+  lint:
+  test:
