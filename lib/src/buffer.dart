@@ -52,10 +52,10 @@ abstract interface class Buffer {
   }
 
   /// Positions the cursor at the position of the byte.
-  Iterable<ReadRequest> findByte(Cursor cursor) => extendUntil(
+  Iterable<ReadRequest> findByte(Cursor cursor, {required int byte}) =>
+      extendUntil(
         (chunk) {
-          final index = chunk.indexOf(0x00);
-
+          final index = chunk.indexOf(byte);
           cursor.advance(
             switch (index) {
               -1 => chunk.length,
