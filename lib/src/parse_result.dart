@@ -1,8 +1,3 @@
-// Copyright (c) 2024 Fabrizio Guidotti
-//
-// This software is released under the MIT License.
-// https://opensource.org/licenses/MIT
-
 import 'package:meta/meta.dart';
 
 @immutable
@@ -10,54 +5,6 @@ sealed class PartialParseResult<T> {
   const PartialParseResult();
 }
 
-/// Represents a request to read data.
-@immutable
-final class ReadRequest extends PartialParseResult<Never> {
-  const ReadRequest({
-    this.count,
-    this.position,
-    this.allowPartial = true,
-  }) : assert(
-          count != null || allowPartial,
-          'If count is not provided, allowPartial must be true',
-        );
-
-  const ReadRequest.require(int this.count, {this.position})
-      : allowPartial = false;
-
-  /// The number of bytes to read.
-  final int? count;
-
-  /// The position to start reading from.
-  /// If not provided, the internal position of the source is used.
-  final int? position;
-
-  /// Whether to allow partial reads.
-  /// If `false`, the source must return the exact number of bytes requested,
-  /// otherwise the source is considered exhausted and parsing stops.
-  /// If `true`, the source can return less than the requested number of bytes.
-  /// It is assumed to be the parser's responsibility to check enough data is
-  /// available.
-  final bool allowPartial;
-
-  @override
-  String toString() => 'ReadRequest(count: $count, position: $position)';
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ReadRequest &&
-          runtimeType == other.runtimeType &&
-          count == other.count &&
-          position == other.position &&
-          allowPartial == other.allowPartial;
-
-  @override
-  int get hashCode =>
-      count.hashCode ^ position.hashCode ^ allowPartial.hashCode;
-}
-
-/// Represents a successfully parsed result.
 @immutable
 final class CompleteParseResult<T> extends PartialParseResult<T> {
   const CompleteParseResult(this.value);
@@ -65,4 +12,81 @@ final class CompleteParseResult<T> extends PartialParseResult<T> {
 
   @override
   String toString() => 'CompleteParseResult($value)';
+}
+
+/// Base class for read requests
+@immutable
+sealed class ReadRequest extends PartialParseResult<Never> {
+  const ReadRequest({
+    required this.sourcePosition,
+    required this.bufferPosition,
+  });
+
+  /// The position to start reading from in the source.
+  /// If not provided, the internal position of the source is used.
+  final int? sourcePosition;
+
+  /// Position in the buffer where the read data should be placed
+  /// If null, the data will be appended to the end of the buffer
+  final int? bufferPosition;
+}
+
+/// Request for reading an exact number of bytes
+@immutable
+final class ExactReadRequest extends ReadRequest {
+  const ExactReadRequest({
+    required this.count,
+    super.sourcePosition,
+    super.bufferPosition,
+  });
+
+  /// The exact number of bytes to read
+  final int count;
+
+  @override
+  String toString() =>
+      'ExactReadRequest(count: $count, position: $sourcePosition, bufferPosition: $bufferPosition)';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ExactReadRequest &&
+          runtimeType == other.runtimeType &&
+          count == other.count &&
+          sourcePosition == other.sourcePosition &&
+          bufferPosition == other.bufferPosition;
+
+  @override
+  int get hashCode => Object.hash(count, sourcePosition, bufferPosition);
+}
+
+/// Request for reading any available bytes up to a maximum
+@immutable
+final class PartialReadRequest extends ReadRequest {
+  const PartialReadRequest({
+    this.maxCount,
+    super.sourcePosition,
+    super.bufferPosition,
+  });
+
+  /// The maximum number of bytes to read
+  /// If null, it is up to the implementation to decide
+  /// how many bytes to read
+  final int? maxCount;
+
+  @override
+  String toString() =>
+      'PartialReadRequest(maxCount: $maxCount, position: $sourcePosition, bufferPosition: $bufferPosition)';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PartialReadRequest &&
+          runtimeType == other.runtimeType &&
+          maxCount == other.maxCount &&
+          sourcePosition == other.sourcePosition &&
+          bufferPosition == other.bufferPosition;
+
+  @override
+  int get hashCode => Object.hash(maxCount, sourcePosition, bufferPosition);
 }
