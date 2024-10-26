@@ -24,7 +24,7 @@ abstract interface class Buffer {
   /// Yields read requests until the buffer reaches the given [newLength].
   Iterable<ReadRequest> extendToLength(int newLength) sync* {
     while (length < newLength) {
-      yield ReadRequest(count: newLength - length);
+      yield ExactReadRequest(count: newLength - length);
     }
   }
 
@@ -39,7 +39,8 @@ abstract interface class Buffer {
     var newChunkEnd = newChunkStart = startFrom ?? length;
 
     do {
-      yield const ReadRequest();
+      // Problem: this also yields a read request when the range is already in the buffer.
+      yield const PartialReadRequest();
       newChunkEnd = length;
     } while (
         // Nothing was added to the buffer.
@@ -51,28 +52,31 @@ abstract interface class Buffer {
             ));
   }
 
-  /// Positions the cursor at the position of the byte.
-  Iterable<ReadRequest> findByte(Cursor cursor, {required int byte}) =>
-      extendUntil(
-        (chunk) {
-          final index = chunk.indexOf(byte);
-          cursor.advance(
-            switch (index) {
-              -1 => chunk.length,
-              _ => index,
-            },
-          );
-
-          return index >= 0;
+  /// Positions the cursor at the first occurrence of the byte.
+  Iterable<ReadRequest> findByte(Cursor cursor, {required int byte}) sync* {
+    bool scanChunk(Uint8List chunk) {
+      final index = chunk.indexOf(byte);
+      cursor.advance(
+        switch (index) {
+          -1 => chunk.length,
+          _ => index,
         },
-        startFrom: cursor.position,
       );
+
+      return index >= 0;
+    }
+
+    yield* extendUntil(
+      scanChunk,
+      startFrom: cursor.position,
+    );
+  }
 
   /// Clear the buffer and dispose any underlying resources.
   void clear();
 }
 
-/// A naive implementation of a buffer that stores bytes in a [Uint8List].
+/// A naive implementation of a buffer that stores bytes in a [Uint8List]
 /// and grows the list by copying the old data to a new list.
 final class BytesBuffer extends Buffer {
   BytesBuffer([int initialSize = 0]) : _data = Uint8List(initialSize);
@@ -82,9 +86,31 @@ final class BytesBuffer extends Buffer {
   int get length => _data.length;
 
   @override
-  void grow(Uint8List bytes) => _data = Uint8List(_data.length + bytes.length)
-    ..setAll(0, _data)
-    ..setAll(_data.length, bytes);
+  void grow(Uint8List bytes, {int? position}) {
+    if (position == null || position >= _data.length) {
+      // Append mode - same as original behavior
+      final newData = Uint8List(_data.length + bytes.length)
+        ..setAll(0, _data)
+        ..setAll(_data.length, bytes);
+      _data = newData;
+    } else {
+      // Insert/replace at position
+      final endPosition = position + bytes.length;
+      final newLength = max(endPosition, _data.length);
+      final newData = Uint8List(newLength)
+        // Copy data before position
+        ..setAll(0, _data.sublist(0, position))
+        // Insert new bytes
+        ..setAll(position, bytes);
+
+      // If we're not at the end, copy remaining data
+      if (endPosition < _data.length) {
+        newData.setAll(endPosition, _data.sublist(endPosition));
+      }
+
+      _data = newData;
+    }
+  }
 
   @override
   Uint8List getBytesView([int start = 0, int? end]) {
