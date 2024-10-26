@@ -31,7 +31,7 @@ The package also contains some concrete implementations for the abstractions abo
 
 Iterable<PartialParseResult<String>> consume(Buffer b) sync* {
   // Require at least 100 bytes to continue
-  yield ReadRequest.require(100);
+  yield ExactReadRequest(count: 100);
 
   // here, you should safely assume that the buffer has at least 100 bytes
 

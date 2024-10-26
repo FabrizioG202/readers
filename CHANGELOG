@@ -1,2 +1,6 @@
 # 0.0.1-alpha
 - Initial release
+
+# 0.0.2-alpha
+- Updated the request system
+- Added a `defaultRequestSize` to handleSync
