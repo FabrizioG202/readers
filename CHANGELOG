@@ -4,3 +4,10 @@
 # 0.0.2-alpha
 - Updated the request system
 - Added a `defaultRequestSize` to handleSync
+
+# 0.0.3-alpha
+- Added typedef for `ParseIterator`
+- Fixed some bugs in the Buffer growing and extension logic.
+- Renamed `BytesBuffer` to `ByteAccumulator` to avoid confusion with `ByteBuffer`.
+- Added a `Slice` method to make slicing/range operations easier and more concise.
+- Added a `passthrough` method to make nested parsing easier.

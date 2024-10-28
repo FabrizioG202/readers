@@ -29,7 +29,7 @@ The package also contains some concrete implementations for the abstractions abo
 ## Examples:
 ```dart
 
-Iterable<PartialParseResult<String>> consume(Buffer b) sync* {
+ParseIterator<String> consume(Buffer b) sync* {
   // Require at least 100 bytes to continue
   yield ExactReadRequest(count: 100);
 
@@ -39,7 +39,7 @@ Iterable<PartialParseResult<String>> consume(Buffer b) sync* {
   final bytes = b.getView();
 }
 
-Iterable<PartialParseResult<String>> consumeString(Buffer b) sync* {
+ParseIterator<String> consumeString(Buffer b) sync* {
   
   // Hold the parsing until the buffer contains a null character (0x00)
   // ! The `contains` callback is called on every buffer extension.

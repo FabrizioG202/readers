@@ -1,17 +1,18 @@
 import 'package:readers/readers.dart';
+import 'package:readers/src/parse_iterator.dart';
 
-typedef ManagedIncrementalParser<T> = Iterable<PartialParseResult<T>> Function(
-  BytesBuffer buffer,
+typedef ManagedParserGenerator<T> = ParseIterator<T> Function(
+  ByteAccumulator buffer,
 );
 
 // API: Handle the case when the function does not return a CompleteParseResult.
 // API: Maybe add a default value to return in case of an exception.
 T handleSync<T>(
-  ManagedIncrementalParser<T> createIterable,
+  ManagedParserGenerator<T> createIterable,
   SyncFileSource source, {
   int defaultRequestSize = 2,
 }) {
-  final buffer = BytesBuffer();
+  final buffer = ByteAccumulator();
   final iterable = createIterable(buffer);
 
   mainLoop:

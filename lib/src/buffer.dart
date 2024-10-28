@@ -9,7 +9,7 @@ import 'dart:typed_data';
 import 'package:readers/src/cursor.dart';
 import 'package:readers/src/parse_result.dart';
 
-abstract interface class Buffer {
+abstract base class Buffer {
   /// Current length of the buffer in bytes.
   int get length;
 
@@ -36,7 +36,7 @@ abstract interface class Buffer {
     int? startFrom,
   }) sync* {
     var newChunkStart = startFrom ?? length;
-    var newChunkEnd = newChunkStart = startFrom ?? length;
+    var newChunkEnd = newChunkStart;
 
     do {
       // Problem: this also yields a read request when the range is already in the buffer.
@@ -46,40 +46,49 @@ abstract interface class Buffer {
         // Nothing was added to the buffer.
         // ? Maybe here we might want to notify the user
         // Since we are not making any progress and this might be an infinite loop
-        newChunkEnd >= newChunkStart &&
+        newChunkEnd > newChunkStart &&
             !predicate(
               getBytesView(newChunkStart, newChunkStart = newChunkEnd),
             ));
   }
 
   /// Positions the cursor at the first occurrence of the byte.
-  Iterable<ReadRequest> findByte(Cursor cursor, {required int byte}) sync* {
-    bool scanChunk(Uint8List chunk) {
-      final index = chunk.indexOf(byte);
-      cursor.advance(
-        switch (index) {
-          -1 => chunk.length,
-          _ => index,
+  Iterable<ReadRequest> advanceToByte(
+    Cursor cursor, {
+    required int byte,
+  }) =>
+      extendUntil(
+        (Uint8List chunk) {
+          final index = chunk.indexOf(byte);
+
+          cursor.advance(
+            switch (index) {
+              -1 => chunk.length,
+              _ => index + 1,
+            },
+          );
+
+          return index >= 0;
         },
+        startFrom: cursor.position,
       );
-
-      return index >= 0;
-    }
-
-    yield* extendUntil(
-      scanChunk,
-      startFrom: cursor.position,
-    );
-  }
 
   /// Clear the buffer and dispose any underlying resources.
   void clear();
+
+  /// ! The function below are not implemented
+  /// as their utility is currently being evaluated.
+  int get capacity => throw UnimplementedError();
+  void ensureCapacity() => throw UnimplementedError();
+  void trimToSize() => throw UnimplementedError();
 }
 
 /// A naive implementation of a buffer that stores bytes in a [Uint8List]
 /// and grows the list by copying the old data to a new list.
-final class BytesBuffer extends Buffer {
-  BytesBuffer([int initialSize = 0]) : _data = Uint8List(initialSize);
+final class ByteAccumulator extends Buffer {
+  ByteAccumulator([int initialSize = 0]) : _data = Uint8List(initialSize);
+  ByteAccumulator.withData(Uint8List data) : _data = Uint8List.fromList(data);
+
   Uint8List _data;
 
   @override
