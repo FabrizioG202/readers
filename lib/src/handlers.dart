@@ -1,5 +1,4 @@
 import 'package:readers/readers.dart';
-import 'package:readers/src/parse_iterator.dart';
 
 typedef ManagedParserGenerator<T> = ParseIterator<T> Function(
   ByteAccumulator buffer,
@@ -11,6 +10,7 @@ T handleSync<T>(
   ManagedParserGenerator<T> createIterable,
   SyncFileSource source, {
   int defaultRequestSize = 2,
+  bool clearOnPassthrough = false,
 }) {
   final buffer = ByteAccumulator();
   final iterable = createIterable(buffer);
@@ -41,6 +41,9 @@ T handleSync<T>(
 
       case CompleteParseResult<T>(:final value):
         return value;
+      case PassthroughRequest():
+        if (clearOnPassthrough) buffer.clear();
+        continue;
     }
   }
 

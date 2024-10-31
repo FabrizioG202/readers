@@ -10,8 +10,8 @@ Iterable<PartialParseResult<X>> passthrough<Y, X>(
 }) sync* {
   for (final i in inner) {
     switch (i) {
-      case ReadRequest():
-        yield i;
+      case ReadRequest() || PassthroughRequest():
+        yield i as PartialParseResult<X>;
       case CompleteParseResult<Y>(:final value):
         onComplete?.call(value);
         return;

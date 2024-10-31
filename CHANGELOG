@@ -11,3 +11,7 @@
 - Renamed `BytesBuffer` to `ByteAccumulator` to avoid confusion with `ByteBuffer`.
 - Added a `Slice` method to make slicing/range operations easier and more concise.
 - Added a `passthrough` method to make nested parsing easier.
+
+# 0.0.4-alpha
+- Added a `PassthroughResult`
+- Implemented a better (still experimental) passthrough system

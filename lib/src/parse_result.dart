@@ -3,15 +3,32 @@ import 'package:meta/meta.dart';
 @immutable
 sealed class PartialParseResult<T> {
   const PartialParseResult();
+
+  /// Stops the parsing operation.
+  static const stop = CompleteParseResult<void>(null);
 }
 
+/// A full parse result.
+/// This is the result of a successful parse operation.
+///
+/// If [isLast] is true, the parse operation is complete.
+/// If [isLast] is false, the caller can expect more data to be available
 @immutable
 final class CompleteParseResult<T> extends PartialParseResult<T> {
-  const CompleteParseResult(this.value);
+  const CompleteParseResult(this.value, {this.isLast = true});
   final T value;
+  final bool isLast;
 
   @override
   String toString() => 'CompleteParseResult($value)';
+}
+
+/// A notification that the parser should continue reading data.
+/// Depending on the implementation, it might be wise to
+/// clear the buffer on this request.
+@immutable
+final class PassthroughRequest extends PartialParseResult<Never> {
+  const PassthroughRequest();
 }
 
 /// Base class for read requests
