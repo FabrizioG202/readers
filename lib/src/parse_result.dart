@@ -16,6 +16,10 @@ sealed class PartialParseResult<T> {
 @immutable
 final class CompleteParseResult<T> extends PartialParseResult<T> {
   const CompleteParseResult(this.value, {this.isLast = true});
+
+  /// FIXME: This can't be the definitive name of the object.
+  /// it sounds like a joke.
+  const CompleteParseResult.incomplete(this.value) : isLast = false;
   final T value;
   final bool isLast;
 

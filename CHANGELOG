@@ -15,3 +15,8 @@
 # 0.0.4-alpha
 - Added a `PassthroughResult`
 - Implemented a better (still experimental) passthrough system
+
+# 0.0.5-alpha
+- Modified `handleSync` to handle returning more than one result.
+- Inside `handleSync`, not returning a value while not requesting more data will no longer throw an ambiguous `not enough data` error.
+- Added a `CompleteParseResult.incomplete` constructor.

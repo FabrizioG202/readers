@@ -6,17 +6,18 @@ typedef ManagedParserGenerator<T> = ParseIterator<T> Function(
 
 // API: Handle the case when the function does not return a CompleteParseResult.
 // API: Maybe add a default value to return in case of an exception.
-T handleSync<T>(
+Iterable<T> handleSync<T>(
   ManagedParserGenerator<T> createIterable,
   SyncFileSource source, {
   int defaultRequestSize = 2,
   bool clearOnPassthrough = false,
-}) {
+}) sync* {
   final buffer = ByteAccumulator();
   final iterable = createIterable(buffer);
 
   mainLoop:
   for (final partial in iterable) {
+    int? missedRequestBytes;
     switch (partial) {
       case ExactReadRequest(
           :final count,
@@ -24,7 +25,12 @@ T handleSync<T>(
           bufferPosition: final bufferPosition
         ):
         final newData = source.read(count, offset: position);
-        if (newData.isEmpty || newData.length < count) break mainLoop;
+
+        // Failure due to not enough data.
+        if (newData.isEmpty || newData.length < count) {
+          missedRequestBytes = count - newData.length;
+          continue notEnoughData;
+        }
 
         buffer.grow(newData, position: bufferPosition);
 
@@ -35,18 +41,25 @@ T handleSync<T>(
         ):
         final requestSize = maxCount ?? defaultRequestSize;
         final newData = source.read(requestSize, offset: position);
+
+        // Softly break.
         if (newData.isEmpty) break;
 
         buffer.grow(newData, position: bufferPosition);
 
-      case CompleteParseResult<T>(:final value):
-        return value;
+      case CompleteParseResult<T>(:final value, :final isLast):
+        yield value;
+
+        /// We expect no more data to be read.
+        if (isLast) break mainLoop;
+
       case PassthroughRequest():
         if (clearOnPassthrough) buffer.clear();
         continue;
+
+      notEnoughData:
+      default:
+        throw StateError('Not enough data, missed $missedRequestBytes bytes.');
     }
   }
-
-  // EASY-FIXME: Choose wether to throw an exception or errors.
-  throw Exception('Not enough data!');
 }
