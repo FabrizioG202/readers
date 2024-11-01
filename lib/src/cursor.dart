@@ -83,5 +83,8 @@ final class SliceCursor extends Cursor {
   }
 
   @override
+  void reset() => _position = pivot = 0;
+
+  @override
   String toString() => 'Slice(pivot: $pivot, position: $position)';
 }
