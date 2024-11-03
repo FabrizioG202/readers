@@ -15,6 +15,18 @@ In general, I tried to design the API in such a way that would keep it out of th
 - **Incremental Parsing**: Extend buffers until specific conditions are met.
 - **Flexible Data Handling**: Supports both synchronous and asynchronous data sources, with a single API.
 
+## Installation
+
+This package is not available on pub.dev. Add it as a git dependency in your `pubspec.yaml`. See the [Dart documentation](https://dart.dev/tools/pub/dependencies#git-packages) for more details.
+
+## Limitations
+
+The peculiar workings of the package mean as it very easy to accidentally create endless loops. I am working on ways to make this harder to do, but for now, ensure your conditions for growing buffers and ending parsings are well-defined and will eventually be met.
+
+## See It in Action
+
+Check out the [biodart project](https://github.com/FabrizioG202/biodart) and especially the [`hic` module](https://github.com/FabrizioG202/biodart/tree/main/hic), where the package is heavily used to efficiently parse data incrementally.
+
 ## Basic Framework Overview:
 
 The following are the main abstractions provided by the package:
