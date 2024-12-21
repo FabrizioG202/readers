@@ -1,11 +1,14 @@
 # 0.0.1-alpha
+
 - Initial release
 
 # 0.0.2-alpha
+
 - Updated the request system
 - Added a `defaultRequestSize` to handleSync
 
 # 0.0.3-alpha
+
 - Added typedef for `ParseIterator`
 - Fixed some bugs in the Buffer growing and extension logic.
 - Renamed `BytesBuffer` to `ByteAccumulator` to avoid confusion with `ByteBuffer`.
@@ -13,10 +16,17 @@
 - Added a `passthrough` method to make nested parsing easier.
 
 # 0.0.4-alpha
+
 - Added a `PassthroughResult`
 - Implemented a better (still experimental) passthrough system
 
 # 0.0.5-alpha
+
 - Modified `handleSync` to handle returning more than one result.
 - Inside `handleSync`, not returning a value while not requesting more data will no longer throw an ambiguous `not enough data` error.
 - Added a `CompleteParseResult.incomplete` constructor.
+
+# 0.1.0-alpha
+
+- Refractored the code base for increased flexibility.
+- Added Experimental zlib decoding support.
