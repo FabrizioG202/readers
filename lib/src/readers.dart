@@ -4,23 +4,23 @@ import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 
-typedef ParseIterable = Iterable<ParserMessage>;
-typedef ParserGenerator = ParseIterable Function(ByteAccumulator buffer);
+typedef ParseIterable<T> = Iterable<ParseEvent<T>>;
+typedef ParserGenerator<T> = ParseIterable<T> Function(ByteAccumulator buffer);
 
 @immutable
-sealed class ParserMessage {
-  const ParserMessage();
+sealed class ParseEvent<T> {
+  const ParseEvent();
 }
 
 @immutable
-final class ResultMessage extends ParserMessage {
-  const ResultMessage(this.result);
-  final dynamic result;
+final class ParseResult<T> extends ParseEvent<T> {
+  const ParseResult(this.result);
+  final T result;
 }
 
 @immutable
-final class RangeReadRequest extends ParserMessage {
-  const RangeReadRequest(
+final class ByteRangeRequest extends ParseEvent<Never> {
+  const ByteRangeRequest(
     this.start,
     this.end, {
     this.exact = false,
@@ -84,25 +84,23 @@ class SyncFileSource implements DataSource, Source {
   void close() => _raf?.closeSync();
 }
 
-Iterable<dynamic> handleSync(
-  ParseIterable Function(ByteAccumulator) generator,
+Iterable<T> handleSync<T>(
+  ParseIterable<T> Function(ByteAccumulator) generator,
   SyncFileSource source,
 ) sync* {
   final buffer = ByteAccumulator();
 
   for (final message in generator(buffer)) {
     switch (message) {
-      case ResultMessage(:final result):
+      case ParseResult(:final result):
         yield result;
 
-      case RangeReadRequest(
+      case ByteRangeRequest(
           :final start,
           :final end,
         ):
         final newData = source.readRange(start, end);
         buffer.grow(newData);
-
-      // print('Inside Handle Sync: ${_formatBytes(newData)}');
     }
   }
 }

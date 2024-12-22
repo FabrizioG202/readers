@@ -12,7 +12,7 @@ final class FastaRead {
 
 // Very Naive Implementation of a FastA file parser.
 // It is mainly
-ParseIterable readFasta(ByteAccumulator buffer) sync* {
+ParseIterable<FastaRead> readFasta(ByteAccumulator buffer) sync* {
   final cursor = Cursor();
 
   // Fasta Stuff
@@ -25,7 +25,7 @@ ParseIterable readFasta(ByteAccumulator buffer) sync* {
   while (true) {
     // Request 5 bytes.
     // This is an arbitrary length to not read too much data at the same time.
-    yield RangeReadRequest(cursor.position, cursor.position + 5, purgePreceding: true);
+    yield ByteRangeRequest(cursor.position, cursor.position + 5, purgePreceding: true);
 
     // Get the view bytes and, since exact is false,
     // we might have read less bytes than 5, we advance the cursor only
@@ -48,7 +48,7 @@ ParseIterable readFasta(ByteAccumulator buffer) sync* {
               );
             }
             final seq = sequence.toString().replaceAll(RegExp(r'\s'), '');
-            yield ResultMessage(FastaRead(header, seq));
+            yield ParseResult(FastaRead(header, seq));
             sequence.clear();
           }
           header = '';
@@ -80,7 +80,7 @@ ParseIterable readFasta(ByteAccumulator buffer) sync* {
       );
     }
     final seq = sequence.toString().replaceAll(RegExp(r'\s'), '');
-    yield ResultMessage(FastaRead(header, seq));
+    yield ParseResult(FastaRead(header, seq));
   }
 }
 

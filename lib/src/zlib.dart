@@ -9,7 +9,7 @@ import 'package:readers/src/readers.dart';
 /// This has NO CONTROL over the [compressedBuffer] it gets
 /// passed in. It can only read data from it (albeit we have no way to
 /// enforce this rn)
-ParseIterable zlibDecode(ByteAccumulator compressedBuffer, ParserGenerator inner) sync* {
+ParseIterable<T> zlibDecode<T>(ByteAccumulator compressedBuffer, ParserGenerator<T> inner) sync* {
   // Initialize the filter.
   final libFilter = RawZLibFilter.inflateFilter();
 
@@ -47,7 +47,7 @@ ParseIterable zlibDecode(ByteAccumulator compressedBuffer, ParserGenerator inner
   // has minimum [requestedLength] bytes
   // TODO: Inline this
   // ignore: no_leading_underscores_for_local_identifiers
-  Iterable<RangeReadRequest> _ensureDecompressedLength(int requestedLength) sync* {
+  Iterable<ByteRangeRequest> _ensureDecompressedLength(int requestedLength) sync* {
     // Part of the conde performing the 'dirty' work.
     // This reads stuff.
     while (decompressedBuffer.lengthInBytes < requestedLength) {
@@ -56,7 +56,7 @@ ParseIterable zlibDecode(ByteAccumulator compressedBuffer, ParserGenerator inner
       // We have to do this since we are allowing less than 5 bytes to be read,
       // as it will be the case when the file ends.
       final position = compressedBuffer.lengthInBytes;
-      yield RangeReadRequest(lastFedCursor.position, lastFedCursor.position + 5);
+      yield ByteRangeRequest(lastFedCursor.position, lastFedCursor.position + 5);
       final newlyReadData = compressedBuffer.viewRange(
         position,
         compressedBuffer.lengthInBytes,
@@ -78,7 +78,7 @@ ParseIterable zlibDecode(ByteAccumulator compressedBuffer, ParserGenerator inner
 
     switch (request) {
       // We were requested bytes up to the given one.
-      case RangeReadRequest(
+      case ByteRangeRequest(
           :final start,
           :final end, // (this offset is relative to the decompressed buffer)
           :final purgePreceding // Wether to purge the DECOMPRESSED data
@@ -95,7 +95,7 @@ ParseIterable zlibDecode(ByteAccumulator compressedBuffer, ParserGenerator inner
         // with a smaller buffer and thus gain in performance.
         if (purgePreceding) decompressedBuffer.purgeUpTo(start);
 
-      case ResultMessage():
+      case ParseResult():
         yield request;
     }
   }
