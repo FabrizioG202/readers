@@ -9,7 +9,11 @@ import 'package:readers/src/readers.dart';
 /// This has NO CONTROL over the [compressedBuffer] it gets
 /// passed in. It can only read data from it (albeit we have no way to
 /// enforce this rn)
-ParseIterable<T> zlibDecode<T>(ByteAccumulator compressedBuffer, ParserGenerator<T> inner) sync* {
+ParseIterable<T> zlibDecode<T>(
+  ByteAccumulator compressedBuffer,
+  ParserGenerator<T> inner, {
+  int decompressChunkSize = 1024,
+}) sync* {
   // Initialize the filter.
   final libFilter = RawZLibFilter.inflateFilter();
 
@@ -56,7 +60,7 @@ ParseIterable<T> zlibDecode<T>(ByteAccumulator compressedBuffer, ParserGenerator
       // We have to do this since we are allowing less than 5 bytes to be read,
       // as it will be the case when the file ends.
       final position = compressedBuffer.lengthInBytes;
-      yield ByteRangeRequest(lastFedCursor.position, lastFedCursor.position + 5);
+      yield ByteRangeRequest(lastFedCursor.position, lastFedCursor.position + decompressChunkSize);
       final newlyReadData = compressedBuffer.viewRange(
         position,
         compressedBuffer.lengthInBytes,

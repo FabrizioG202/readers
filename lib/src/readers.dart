@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
+import 'dart:math' as math;
 
 typedef ParseIterable<T> = Iterable<ParseEvent<T>>;
 typedef ParserGenerator<T> = ParseIterable<T> Function(ByteAccumulator buffer);
@@ -84,7 +85,7 @@ class SyncFileSource implements DataSource, Source {
   void close() => _raf?.closeSync();
 }
 
-Iterable<T> handleSync<T>(
+Iterable<T> parseSync<T>(
   ParseIterable<T> Function(ByteAccumulator) generator,
   SyncFileSource source,
 ) sync* {
@@ -105,10 +106,11 @@ Iterable<T> handleSync<T>(
   }
 }
 
-/// A simple buffer.
+/// A simple buffer with capacity management.
 class ByteAccumulator {
-  ByteAccumulator() : _data = Uint8List(0);
+  ByteAccumulator() : _data = Uint8List(16);
   Uint8List _data;
+  int _length = 0;
 
   /// Padding allows to save memory
   /// when we no longer care about bytes before
@@ -118,30 +120,31 @@ class ByteAccumulator {
   /// The length in bytes of this
   /// This includes the length of the data and the removed bytes.
   int get lengthInBytes {
-    return _data.length + _removedBytesCount;
+    return _length + _removedBytesCount;
   }
 
   /// Adds bytes to the end of the buffer.
-  /// TODO: Grow the buffer more than the length to optimize
-  /// for quick sequential grows.
   void grow(Uint8List bytes) {
-    final newData = Uint8List(_data.length + bytes.length)
-      ..setAll(0, _data)
-      ..setAll(_data.length, bytes);
-    _data = newData;
+    final neededLength = _length + bytes.length;
+    if (neededLength > _data.length) {
+      final newCapacity = math.max(_data.length * 2, neededLength);
+      final newData = Uint8List(newCapacity)..setAll(0, _data.sublist(0, _length));
+      _data = newData;
+    }
+    _data.setAll(_length, bytes);
+    _length += bytes.length;
   }
 
   /// Purges bytes from the start of the buffer until
   /// the given threshold
   void purgeUpTo(int threshold) {
-    // FIX: Maybe this could be better with a RangeError.checkValidRange
-    // to avoid negative threshold.
     if (threshold > lengthInBytes) {
       throw ArgumentError('Threshold is greater than the buffer length');
     }
 
     final toPurgeCount = threshold - _removedBytesCount;
-    _data = _data.sublist(toPurgeCount);
+    _data.setRange(0, _length - toPurgeCount, _data, toPurgeCount);
+    _length -= toPurgeCount;
     _removedBytesCount = threshold;
   }
 
@@ -153,10 +156,6 @@ class ByteAccumulator {
 
   /// Get a view of the given range
   /// (does not modify the buffer)
-  /// TODO: perform range checks on the [start] and [end] values
-  /// Allows reading only non-purged data
-  /// (see [_removedBytesCount] for more information about
-  /// data purging)
   Uint8List viewRange(int start, int end) {
     return _data.sublist(
       start - _indexableStart,
@@ -166,7 +165,7 @@ class ByteAccumulator {
 
   @override
   String toString() {
-    return 'ByteAccumulator(length: $lengthInBytes, padding: $_removedBytesCount)';
+    return 'ByteAccumulator(length: $lengthInBytes, capacity: ${_data.length}, padding: $_removedBytesCount)';
   }
 }
 
