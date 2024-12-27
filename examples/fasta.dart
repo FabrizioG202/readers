@@ -89,7 +89,7 @@ void main() {
   final plainSource = SyncFileSource(File('./examples/fasta1.fa'))..open();
 
   /// Read from a GZipped Source.
-  final resultFromGZipped = handleSync(
+  final resultFromGZipped = parseSync(
     (b) {
       return zlibDecode(b, (c) => readFasta(c));
     },
@@ -98,7 +98,7 @@ void main() {
 
   print(resultFromGZipped);
 
-  final resultFromPlain = handleSync(
+  final resultFromPlain = parseSync(
     (b) {
       return readFasta(b);
     },

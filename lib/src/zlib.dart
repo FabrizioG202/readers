@@ -24,18 +24,22 @@ ParseIterable<T> zlibDecode<T>(
   // bytes that was fed to the decompressor.
   final lastFedCursor = Cursor();
 
-  // TODO: Inline this
-  // ignore: no_leading_underscores_for_local_identifiers
-  void _feedToFilter(Uint8List newlyRead) {
-    libFilter.process(newlyRead, 0, newlyRead.length);
-    lastFedCursor.advance(newlyRead.length);
-  }
-
   // Decompressed buffer. It contains the
   // readable data. This is passed on to the
   // inner generator, allowing it to transparently
   // extract the contents of the file
   final decompressedBuffer = ByteAccumulator();
+
+  // TODO: Inline this
+  // ignore: no_leading_underscores_for_local_identifiers
+  void _feedToFilter(int startPos, int endPos) {
+    libFilter.process(
+      compressedBuffer.buffer,
+      compressedBuffer.toIndexablePosition(startPos),
+      compressedBuffer.toIndexablePosition(endPos),
+    );
+    lastFedCursor.positionAt(endPos);
+  }
 
   // TODO: Inline this
   // ignore: no_leading_underscores_for_local_identifiers
@@ -61,17 +65,14 @@ ParseIterable<T> zlibDecode<T>(
       // as it will be the case when the file ends.
       final position = compressedBuffer.lengthInBytes;
       yield ByteRangeRequest(lastFedCursor.position, lastFedCursor.position + decompressChunkSize);
-      final newlyReadData = compressedBuffer.viewRange(
-        position,
-        compressedBuffer.lengthInBytes,
-      );
+      final newPosition = compressedBuffer.lengthInBytes;
 
       // We reached or are beyond the read length.
-      if (newlyReadData.isEmpty) break;
+      if (newPosition == position) break;
 
       // We feed the data to the filter.
       // This increments only the
-      _feedToFilter(newlyReadData);
+      _feedToFilter(position, newPosition);
       _drainFilter();
     }
   }

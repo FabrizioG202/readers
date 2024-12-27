@@ -107,9 +107,11 @@ Iterable<T> parseSync<T>(
 }
 
 /// A simple buffer with capacity management.
+/// TODO: Add an initial size parameter.
 class ByteAccumulator {
   ByteAccumulator() : _data = Uint8List(16);
   Uint8List _data;
+  Uint8List get buffer => _data;
   int _length = 0;
 
   /// Padding allows to save memory
@@ -154,10 +156,16 @@ class ByteAccumulator {
     return _removedBytesCount;
   }
 
+  /// Returns the actual position for the given index.
+  int toIndexablePosition(int index) {
+    return index - _indexableStart;
+  }
+
   /// Get a view of the given range
   /// (does not modify the buffer)
   Uint8List viewRange(int start, int end) {
-    return _data.sublist(
+    return Uint8List.sublistView(
+      _data,
       start - _indexableStart,
       end - _indexableStart,
     );
@@ -177,6 +185,7 @@ class Cursor {
   int _position = 0;
 
   /// Current cursor position.
+  @useResult
   int get position {
     return _position;
   }
