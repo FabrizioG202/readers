@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
-import 'dart:math' as math;
 
 typedef ParseIterable<T> = Iterable<ParseEvent<T>>;
 typedef ParserGenerator<T> = ParseIterable<T> Function(ByteAccumulator buffer);
@@ -15,54 +15,69 @@ sealed class ParseEvent<T> {
 
 @immutable
 final class ParseResult<T> extends ParseEvent<T> {
-  const ParseResult(this.result);
   final T result;
-}
-
-@immutable
-final class ByteRangeRequest extends ParseEvent<Never> {
-  const ByteRangeRequest(
-    this.start,
-    this.end, {
-    this.exact = false,
-    this.purgePreceding = false,
-  });
-
-  /// The range to request.
-  // ignore: avoid_multiple_declarations_per_line
-  final int start, end;
-
-  /// Wether we absolutely need these bytes.
-  /// If [exact] is true, if the exact amount of bytes
-  /// cannot be read, an error is thrown.
-  /// and parsing is terminated.
-  final bool exact;
-
-  /// Wether to remove bytes preceding the ones we are
-  /// requesting. Use this with caution, since
-  /// after purging, bytes from the buffer' start
-  /// to [start] will not be readable anymore,
-  /// and the memory they occupy will be freed.
-  final bool purgePreceding;
+  const ParseResult(this.result);
 
   @override
-  String toString() {
-    return 'RangeReadRequest($start, $end)';
-  }
+  String toString() => 'ParseResult($result)';
 }
 
-/// A source that can be opened and closed.
+/// Just an utility class so that we can quickly create
+/// a dichotomy between ParseResults and type-independent
+/// events, such as [CollapseBuffer] or [RequestRangeForReading].
+/// so that they can be easily passed around in nested parse generators.
+sealed class TransitEvent extends ParseEvent<Never> {
+  const TransitEvent();
+}
+
+/// Request for the underlying buffer to be collapsed at the current position.
+/// This is useful to let the parser known that we no longer care about the contents
+/// of the buffer, and is useful since we will then be able to reuse the buffer
+/// for the next read.
+///
+/// TODO (?) Might be useful to add a parameter to specify the new offset.
+@immutable
+final class CollapseBuffer extends TransitEvent {
+  const CollapseBuffer();
+}
+
+/// Ensures that the specified range is available in the buffer.
+/// NOTE: this does not guarantee that the buffer will be filled with bytes
+/// but only that we have the space to both read and write the bytes.
+@immutable
+final class RequestRangeForReading extends TransitEvent {
+  const RequestRangeForReading(this.firstOffset, this.lastOffset);
+
+  // ignore: avoid_multiple_declarations_per_line
+  final int firstOffset, lastOffset;
+
+  @override
+  String toString() => 'RangeReadRequest($firstOffset, $lastOffset)';
+
+  @override
+  bool operator ==(Object other) {
+    return other is RequestRangeForReading &&
+        other.firstOffset == firstOffset &&
+        other.lastOffset == lastOffset;
+  }
+
+  @override
+  int get hashCode => firstOffset.hashCode ^ lastOffset.hashCode;
+}
+
+/// A source of bytes.
 abstract class Source {
   void open();
   void close();
 }
 
-abstract interface class DataSource extends Source {
-  FutureOr<Uint8List> readRange(int start, int end);
+/// A source that can read bytes into a buffer.
+abstract mixin class SourceReadIntoMixin {
+  FutureOr<int> readInto<T extends List<int>>(T buffer, int start, int end);
 }
 
-/// A synchronous file source.
-class SyncFileSource implements DataSource, Source {
+/// Synchronous file source that reads bytes from a file.
+class SyncFileSource implements SourceReadIntoMixin, Source {
   SyncFileSource(this.file);
 
   final File file;
@@ -72,135 +87,303 @@ class SyncFileSource implements DataSource, Source {
   void open() => _raf = file.openSync();
 
   @override
-  Uint8List readRange(int start, int end) {
+  void close() => _raf?.closeSync();
+
+  @override
+  int readInto<T extends List<int>>(T buffer, int start, int end) {
     if (_raf case final raf?) {
       raf.setPositionSync(start);
-      return raf.readSync(end - start);
+      return raf.readIntoSync(buffer, 0, end - start);
     }
 
     throw StateError('The file is not open');
   }
-
-  @override
-  void close() => _raf?.closeSync();
 }
 
+/// Provides a plarform upon which buffer generators can be run
+/// handling the buffer management and the reading of bytes from
+/// the provided [source].
 Iterable<T> parseSync<T>(
-  ParseIterable<T> Function(ByteAccumulator) generator,
-  SyncFileSource source,
-) sync* {
-  final buffer = ByteAccumulator();
+  ParserGenerator<T> generator,
+  SyncFileSource source, {
+  int initialBufferSize = 1024,
+}) sync* {
+  final buffer = ByteAccumulator.zeros(initialSize: initialBufferSize);
 
   for (final message in generator(buffer)) {
     switch (message) {
+      case CollapseBuffer():
+        buffer.softClampEnd(buffer.offset);
+
+      case RequestRangeForReading(
+        firstOffset: final start,
+        lastOffset: final end,
+      ):
+        // ensure that the buffer hass space for the bytes
+        buffer.trimToRange(startOffset: start, endOffset: end);
+
+        // read the bytes into the buffer
+        // TODO (?) we might not need to create a view here,
+        // TODO (?) since the readInto method should be able to handle
+        // TODO (?) the offset.
+        final int readCount = source.readInto(
+          buffer.viewRelative(start),
+          start,
+          end,
+        );
+
+        // soft clamp it to be sure that if we read, for example 0 bytes,
+        // the user knows that we have read nothing.
+        buffer.softClampEnd(start + readCount);
+
       case ParseResult(:final result):
         yield result;
-
-      case ByteRangeRequest(
-          :final start,
-          :final end,
-        ):
-        final newData = source.readRange(start, end);
-        buffer.grow(newData);
     }
   }
 }
 
 /// A simple buffer with capacity management.
-/// TODO: Add an initial size parameter.
+@pragma('vm:isolate-unsendable')
 class ByteAccumulator {
-  ByteAccumulator() : _data = Uint8List(16);
-  Uint8List _data;
-  Uint8List get buffer => _data;
-  int _length = 0;
+  ByteAccumulator.zeros({int initialSize = 16, int offset = 0, int length = 0})
+    : _offset = offset,
+      _length = length,
+      _buffer = Uint8List(initialSize);
 
-  /// Padding allows to save memory
-  /// when we no longer care about bytes before
-  /// a given threshold.
-  int _removedBytesCount = 0;
+  /// Underlying buffer of data.
+  Uint8List _buffer;
 
-  /// The length in bytes of this
-  /// This includes the length of the data and the removed bytes.
-  int get lengthInBytes {
-    return _length + _removedBytesCount;
+  @visibleForTesting
+  Uint8List get buffer {
+    return _buffer;
   }
 
-  /// Adds bytes to the end of the buffer.
-  void grow(Uint8List bytes) {
-    final neededLength = _length + bytes.length;
-    if (neededLength > _data.length) {
-      final newCapacity = math.max(_data.length * 2, neededLength);
-      final newData = Uint8List(newCapacity)..setAll(0, _data.sublist(0, _length));
-      _data = newData;
+  @visibleForTesting
+  int get capacity {
+    return _buffer.length;
+  }
+
+  /// the length of the written bytes
+  /// this can be different from the length of the
+  /// buffer.
+  int _length;
+
+  @visibleForTesting
+  int get length {
+    return _length;
+  }
+
+  /// Allows to offset the buffer, this will make the
+  /// FIRST byte of the array (not including the leftPad)
+  /// to be at the specified offset.
+  int _offset;
+
+  @visibleForTesting
+  int get offset {
+    return _offset;
+  }
+
+  int get lastOffset {
+    return _offset + _length;
+  }
+
+  Uint8List get bytes {
+    return _buffer.sublist(0, 0 + _length);
+  }
+
+  void softClampEnd(int end) {
+    _length = end - _offset;
+  }
+
+  void trimToRange({required int startOffset, required int endOffset}) {
+    final requiredSize = pow2roundup(endOffset - startOffset);
+    final oldRepresentedRange = Interval(_offset, _offset + _length);
+    final newRepresentedRange = Interval(startOffset, endOffset);
+    final overlap = oldRepresentedRange.computeOverlap(newRepresentedRange);
+
+    // Create new buffer if size needs to change
+    if (_buffer.length != requiredSize) {
+      final oldBuffer = _buffer;
+      _buffer = Uint8List(requiredSize);
+
+      // Copy overlapping data if needed
+      if (overlap != null) {
+        _copyOverlappingData(
+          overlap,
+          oldBuffer,
+          oldRepresentedRange,
+          newRepresentedRange,
+        );
+      }
+    } else if (overlap != null &&
+        oldRepresentedRange.start != newRepresentedRange.start) {
+      // Same size buffer but needs data shifting
+      _copyOverlappingData(
+        overlap,
+        _buffer,
+        oldRepresentedRange,
+        newRepresentedRange,
+      );
     }
-    _data.setAll(_length, bytes);
-    _length += bytes.length;
+
+    _offset = startOffset;
+    _length = endOffset - startOffset;
   }
 
-  /// Purges bytes from the start of the buffer until
-  /// the given threshold
-  void purgeUpTo(int threshold) {
-    if (threshold > lengthInBytes) {
-      throw ArgumentError('Threshold is greater than the buffer length');
+  void _copyOverlappingData(
+    Interval overlap,
+    Uint8List sourceBuffer,
+    Interval oldRange,
+    Interval newRange,
+  ) {
+    for (
+      var overlapPos = overlap.start;
+      overlapPos < overlap.end;
+      overlapPos++
+    ) {
+      final oldPos = overlapPos - oldRange.start;
+      final newPos = overlapPos - newRange.start;
+      _buffer[newPos] = sourceBuffer[oldPos];
+    }
+  }
+
+  // returns an iterable with tuples (absolute pos, byte)
+  Iterable<(int, int)> indexedIter() sync* {
+    for (int i = 0; i < _length; i++) {
+      yield (_offset + i, _buffer[i]);
+    }
+  }
+
+  /// Rounds numbers <= 2^32 up to the nearest power of 2.
+  /// (Adapted from bytes_builder)
+  @visibleForTesting
+  static int pow2roundup(int value) {
+    assert(value > 0);
+    var x = value;
+    --x;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    return x + 1;
+  }
+
+  /// Sets a byte at the specified absolute offset in the buffer.
+  ///
+  /// The [absoluteOffset] parameter specifies the absolute position in the buffer
+  /// where the byte should be set. This offset is absolute, meaning it is not relative
+  /// to any other position or offset.
+  ///
+  /// The [byte] parameter is the value to be set at the specified offset.
+  ///
+  /// Throws a [RangeError] if the [absoluteOffset] is out of the buffer's bounds.
+  void setByte(int absoluteOffset, int byte) {
+    if (absoluteOffset < _offset || absoluteOffset >= _offset + _length) {
+      throw RangeError('The specified offset is out of bounds');
     }
 
-    final toPurgeCount = threshold - _removedBytesCount;
-    _data.setRange(0, _length - toPurgeCount, _data, toPurgeCount);
-    _length -= toPurgeCount;
-    _removedBytesCount = threshold;
+    _buffer[absoluteOffset - _offset] = byte;
   }
 
-  /// The beginning of the indexable range
-  /// data retrieval is not allowed before this value (included)
-  int get _indexableStart {
-    return _removedBytesCount;
+  /// Gets a byte at the specified absolute offset in the buffer.
+  int getByte(int absoluteOffset) {
+    if (absoluteOffset < _offset || absoluteOffset >= _offset + _length) {
+      throw RangeError('The specified offset is out of bounds');
+    }
+
+    return _buffer[absoluteOffset - _offset];
   }
 
-  /// Returns the actual position for the given index.
-  int toIndexablePosition(int index) {
-    return index - _indexableStart;
+  /// Creates a view of the buffer at the specified absolute offset.
+  /// meaning that setting the first item of the view will set the
+  /// first item of the buffer at the specified offset.
+  @internal
+  @visibleForTesting
+  Uint8List viewRelative(int start) {
+    return Uint8List.sublistView(_buffer, start - _offset);
   }
 
-  /// Get a view of the given range
-  /// (does not modify the buffer)
-  Uint8List viewRange(int start, int end) {
+  /// This will COPY the bytes in the given range, if
+  /// you want a view of the buffer, use [viewRange].
+  Uint8List getRange(int readStart, int position) {
+    return _buffer.sublist(readStart - _offset, position - _offset);
+  }
+
+  /// This will return a view of the buffer in the specified range
+  Uint8List viewRange(int readStart, int position) {
     return Uint8List.sublistView(
-      _data,
-      start - _indexableStart,
-      end - _indexableStart,
+      _buffer,
+      readStart - _offset,
+      position - _offset,
     );
+  }
+
+  /// Sets a range of bytes in the buffer.
+  // TODO: add range checks
+  void setRange(int i, List<int> out) {
+    final relativeOffset = i - _offset;
+    return buffer.setRange(relativeOffset, relativeOffset + out.length, out);
   }
 
   @override
   String toString() {
-    return 'ByteAccumulator(length: $lengthInBytes, capacity: ${_data.length}, padding: $_removedBytesCount)';
+    return 'ByteAccumulator('
+        'offset: $_offset, '
+        'length: $_length, '
+        'bufferSize: ${_buffer.length}'
+        ')';
   }
 }
 
-/// A cursor that tracks position in a buffer.
-/// It only wraps an integer position and thus might look
-/// overengineered, but in the future
-/// we might extend it to provide additional functionalities.
-class Cursor {
-  int _position = 0;
+/// Utility class just to simplify and streamline
+/// overlap computations.
+@internal
+@visibleForTesting
+extension type const Interval._((int a, int b) _) {
+  factory Interval(int a, int b) => Interval._((a, b));
 
-  /// Current cursor position.
-  @useResult
+  int get start => _.$1;
+  int get end => _.$2;
+  int get length => end - start;
+
+  Interval? computeOverlap(Interval other) {
+    final int start = math.max(this.start, other.start);
+    final int end = math.min(this.end, other.end);
+    return start < end ? Interval(start, end) : null;
+  }
+}
+
+/// A cursor that tracks and manipulates a position value.
+///
+/// The [Cursor] class provides functionality to track a position and perform
+/// various operations like advancing, getting the next position, or setting
+/// the position directly.
+///
+/// The main purpose is to provide a mutable reference to a position ([_position])
+/// value that can be easily manipulated and passed around.
+final class Cursor {
+  Cursor([int position = 0]) : _position = position;
+  int _position;
+
   int get position {
     return _position;
   }
 
-  /// Advances cursor by n bytes and returns new position.
-  int advance(int n) {
-    return _position += n;
+  /// Advances the cursor by [amount] positions.
+  void advance(int amount) {
+    _position += amount;
   }
 
-  /// Explictly sets the cursor position.
-  /// TODO: do we really need this?
-  /// Maybe we could return the old position
-  /// to justify this method's existence,
-  /// as something other than a setter.
-  void positionAt(int start) {
-    _position = start;
+  /// Advances the cursor by one position.
+  /// and returns the new position.
+  @pragma('vm:prefer-inline')
+  int next() {
+    return _position++;
+  }
+
+  /// Sets the cursor position to the specified [position].
+  void positionAt(int position) {
+    _position = position;
   }
 }

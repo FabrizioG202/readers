@@ -1,2 +1,2 @@
+export 'src/readers.dart' hide Interval;
 export 'src/zlib.dart';
-export 'src/readers.dart';

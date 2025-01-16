@@ -1,7 +1,14 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:readers/src/readers.dart';
+
+extension on RawZLibFilter {
+  /// Simply a shortcut to make the logic clearer.
+  @pragma('vm:prefer-inline')
+  void processAll<X extends List<int>>(X data) {
+    return process(data, 0, data.length);
+  }
+}
 
 /// This takes in a buffer representing the
 /// bytes of the compressed file, and allows the caller to work
@@ -28,16 +35,13 @@ ParseIterable<T> zlibDecode<T>(
   // readable data. This is passed on to the
   // inner generator, allowing it to transparently
   // extract the contents of the file
-  final decompressedBuffer = ByteAccumulator();
+  final decompressedBuffer = ByteAccumulator.zeros(initialSize: 1024);
 
   // TODO: Inline this
   // ignore: no_leading_underscores_for_local_identifiers
   void _feedToFilter(int startPos, int endPos) {
-    libFilter.process(
-      compressedBuffer.buffer,
-      compressedBuffer.toIndexablePosition(startPos),
-      compressedBuffer.toIndexablePosition(endPos),
-    );
+    /// PERF: Might not need to copy the bytes
+    libFilter.processAll(compressedBuffer.getRange(startPos, endPos));
     lastFedCursor.positionAt(endPos);
   }
 
@@ -47,7 +51,18 @@ ParseIterable<T> zlibDecode<T>(
     while (true) {
       final out = libFilter.processed(flush: false);
       if (out == null) break;
-      decompressedBuffer.grow(Uint8List.fromList(out));
+
+      // We ensure the range is available
+      // TODO (?) Might be worth creating a custom wrapper grow function.
+      {
+        final last = decompressedBuffer.lastOffset;
+        // TODO (?) Set to cascade
+        decompressedBuffer.trimToRange(
+          startOffset: 0,
+          endOffset: decompressedBuffer.lastOffset + out.length,
+        );
+        decompressedBuffer.setRange(last, out);
+      }
     }
   }
 
@@ -55,17 +70,22 @@ ParseIterable<T> zlibDecode<T>(
   // has minimum [requestedLength] bytes
   // TODO: Inline this
   // ignore: no_leading_underscores_for_local_identifiers
-  Iterable<ByteRangeRequest> _ensureDecompressedLength(int requestedLength) sync* {
+  Iterable<RequestRangeForReading> _ensureDecompressedLength(
+    int requestedLength,
+  ) sync* {
     // Part of the conde performing the 'dirty' work.
     // This reads stuff.
-    while (decompressedBuffer.lengthInBytes < requestedLength) {
+    while (decompressedBuffer.lastOffset < requestedLength) {
       // This is where we will ask the underlying bytes from the data source.
       // 5 is an arbitrary value for the size of a chunk.
       // We have to do this since we are allowing less than 5 bytes to be read,
       // as it will be the case when the file ends.
-      final position = compressedBuffer.lengthInBytes;
-      yield ByteRangeRequest(lastFedCursor.position, lastFedCursor.position + decompressChunkSize);
-      final newPosition = compressedBuffer.lengthInBytes;
+      final position = compressedBuffer.lastOffset;
+      yield RequestRangeForReading(
+        lastFedCursor.position,
+        lastFedCursor.position + decompressChunkSize,
+      );
+      final newPosition = compressedBuffer.lastOffset;
 
       // We reached or are beyond the read length.
       if (newPosition == position) break;
@@ -83,25 +103,27 @@ ParseIterable<T> zlibDecode<T>(
 
     switch (request) {
       // We were requested bytes up to the given one.
-      case ByteRangeRequest(
-          :final start,
-          :final end, // (this offset is relative to the decompressed buffer)
-          :final purgePreceding // Wether to purge the DECOMPRESSED data
-        ):
+      case RequestRangeForReading(
+        // :final firstOffset,
+        lastOffset: final end, // (this offset is relative to the decompressed buffer)
+      ):
 
         // Make sure our filter has seen enough bytes
         // and, in turn, that we have enough decompressed bytes.
         yield* _ensureDecompressedLength(end);
 
-        // TODO: Investigate if we need to do this before or after
-        // ensuring that we have enough decompressed bytes.
-        // Maybe it is a better thing to do it before
-        // since when adding to the decompressed buffer, we will be working
-        // with a smaller buffer and thus gain in performance.
-        if (purgePreceding) decompressedBuffer.purgeUpTo(start);
+      // TODO: Investigate if we need to do this before or after
+      // ensuring that we have enough decompressed bytes.
+      // Maybe it is a better thing to do it before
+      // since when adding to the decompressed buffer, we will be working
+      // with a smaller buffer and thus gain in performance.
+      // if (purgePreceding) decompressedBuffer.purgeUpTo(start);
 
       case ParseResult():
         yield request;
+      case CollapseBuffer():
+      // TODO: Implement this.
+      // throw UnimplementedError();
     }
   }
 

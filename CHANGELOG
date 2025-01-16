@@ -30,3 +30,8 @@
 
 - Refractored the code base for increased flexibility.
 - Added Experimental zlib decoding support.
+
+# 0.2.0-alpha
+
+- Refractored the API again.
+- Updated dart SDK constraints to 3.7.0-beta.

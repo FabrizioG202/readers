@@ -1,135 +1,70 @@
-// // Copyright (c) 2024 Fabrizio Guidotti
-// //
-// // This software is released under the MIT License.
-// // https://opensource.org/licenses/MIT
+// ignore_for_file: avoid_redundant_argument_values
 
-// import 'dart:io';
+import 'package:readers/readers.dart';
+import 'package:test/expect.dart';
+import 'package:test/scaffolding.dart';
 
-// import 'package:readers/readers.dart';
-// import 'package:test/test.dart';
+void main() {
+  // Mock data, 128-sized array with bytes from 0 to 127
+  final kSourceOrdered = List<int>.generate(128, (index) => index);
+  const kInitialBufferTestSizes = [null, 8, 16, 24, 32];
 
-// void main() {
-//   group('Unit', () {
-//     late SyncFileSource source;
+  group('Buffer Operations:', () {
+    void testAccumulatorRangeTransform(
+      int initStart,
+      int initEnd,
+      int trimStart,
+      int trimEnd, {
 
-//     setUp(
-//       () => source = SyncFileSource(
-//         // A File containing the string "I think, therefore I am", terminated by a null character
-//         File('./test/data/hello.bin'),
-//       )..open(),
-//     );
+      // If null, the accumulator will be initialized with the
+      // initial range size.
+      int? initialBufferSize,
+    }) {
+      // Initialize the buffer and trim it.
+      final accumulator =
+          ByteAccumulator.zeros(
+              initialSize: initialBufferSize ?? (initEnd - initStart),
+              length: initEnd - initStart,
+              offset: initStart,
+            )
+            ..setRange(initStart, kSourceOrdered.sublist(initStart, initEnd))
+            ..trimToRange(startOffset: trimStart, endOffset: trimEnd);
 
-//     tearDown(
-//       () => source.close(),
-//     );
+      // verify data consistency
+      for (final (index, value) in accumulator.indexedIter()) {
+        if (value != 0 && index >= initStart && index < initEnd) {
+          expect(
+            index,
+            equals(value),
+            reason: 'Shifted index $index should match its value',
+          );
+        }
+      }
+    }
 
-//     test(
-//       'Reading the full file works.',
-//       () => expect(
-//         handleSync(
-//           (b) sync* {
-//             yield* b.extendUntil((newChunk) => newChunk.contains(0x00));
-//             yield CompleteParseResult(String.fromCharCodes(b.getBytesView()));
-//           },
-//           source,
-//         ),
-//         'I think, therefore I am\x00',
-//       ),
-//     );
+    for (final size in kInitialBufferTestSizes) {
+      group('With initial buffer size: ${size ?? "default"}', () {
+        test('Equal size', () {
+          testAccumulatorRangeTransform(8, 16, 12, 20, initialBufferSize: size);
+        });
 
-//     test(
-//       'Requesting more bytes than available throws an exception',
-//       () {
-//         expect(
-//           () => handleSync(
-//             (b) sync* {
-//               yield const ExactReadRequest(count: 100);
-//               yield CompleteParseResult(
-//                 String.fromCharCodes(b.getBytesView()),
-//               );
-//             },
-//             source,
-//           ),
-//           throwsException,
-//         );
-//       },
-//     );
+        if (size != null && size >= 16) {
+          // Cannot start with a buffer less than 16 bytes long for this test.
+          test('Downsize', () {
+            testAccumulatorRangeTransform(
+              8,
+              24,
+              12,
+              20,
+              initialBufferSize: size,
+            );
+          });
+        }
 
-//     test(
-//       'Soft-limiting the number of requested bytes does not throw an exception',
-//       () => expect(
-//         () => handleSync(
-//           (b) sync* {
-//             yield const PartialReadRequest(maxCount: 100);
-//             yield CompleteParseResult(String.fromCharCodes(b.getBytesView()));
-//           },
-//           source,
-//         ),
-//         returnsNormally,
-//       ),
-//     );
-
-//     test(
-//       'The buffer is grown only with the necessary bytes',
-//       () => expect(
-//         handleSync(
-//           (b) sync* {
-//             yield const PartialReadRequest(maxCount: 7);
-//             yield CompleteParseResult(String.fromCharCodes(b.getBytesView()));
-//           },
-//           source,
-//         ),
-//         'I think',
-//       ),
-//     );
-
-//     // Currently we are not supporting this, since the rewrite.
-//     // test('Inserting and Overwriting the buffer works.', () {
-//     //   expect(
-//     //     handleSync(
-//     //       (b) sync* {
-//     //         // Read 'I think'
-//     //         yield const PartialReadRequest(maxCount: 7);
-
-//     //         // Insert 'am' at position 2 (after 'I', producing 'I am')
-//     //         yield const ExactReadRequest(
-//     //           count: 2,
-//     //           sourcePosition: 21, // Start reading ' am' from source
-//     //           bufferPosition: 2,
-//     //         );
-
-//     //         //read the rest of the file, starting from after 'I think
-//     //         yield const PartialReadRequest(
-//     //           maxCount: 100,
-//     //           sourcePosition: 7,
-//     //           bufferPosition: 4, // Start writing at position 4 (after 'I am')
-//     //         );
-//     //         yield CompleteParseResult(String.fromCharCodes(b.getBytesView()));
-//     //       },
-//     //       source,
-//     //     ),
-//     //     'I am, therefore I am\x00',
-//     //   );
-//     // });
-
-//     test('Providing no `bufferPosition` appends', () {
-//       expect(
-//         handleSync(
-//           (b) sync* {
-//             // Read 'think, '
-//             yield const PartialReadRequest(maxCount: 7, sourcePosition: 2);
-
-//             // Append 'think '
-//             yield const ExactReadRequest(
-//               count: 5,
-//               sourcePosition: 2,
-//             );
-//             yield CompleteParseResult(String.fromCharCodes(b.getBytesView()));
-//           },
-//           source,
-//         ),
-//         'think, think',
-//       );
-//     });
-//   });
-// }
+        test('Upsize', () {
+          testAccumulatorRangeTransform(8, 16, 12, 28, initialBufferSize: size);
+        });
+      });
+    }
+  });
+}
